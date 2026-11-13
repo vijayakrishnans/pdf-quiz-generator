@@ -1,0 +1,28 @@
+{
+  "extends": "../../tooling/tsconfig/web.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "types": [
+      "node",
+      "next"
+    ],
+    "paths": {
+      "@/*": [
+        "../../apps/web/*"
+      ]
+    },
+    // The app files these tests import (the template's page and quiz) are
+    // checked as the app checks them (apps/web/tsconfig.json, the template's
+    // own settings): it indexes arrays it has just checked the length of.
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "../../apps/web/cloudflare-env.d.ts"
+  ]
+}

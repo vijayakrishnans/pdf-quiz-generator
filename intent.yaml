@@ -1,0 +1,158 @@
+apiVersion: sourceplane.io/v1
+kind: Intent
+
+metadata:
+  name: pdf-quiz-generator
+  description: Upload a PDF, get a four-question quiz streamed from Workers AI — the template's page, its PDF conversion and its quiz — on Cloudflare Workers + Static Assets
+  namespace: sourceplane
+
+execution:
+  state:
+    backendUrl: https://api-edge-prod.oruncloud.workers.dev
+    # Declared, enforced tenancy: the workspace claim is sent on every remote op
+    # (including the credential-free CI OIDC exchange) so the platform can
+    # enforce claim ⊆ authorized. Declaring it implies strict mode — a
+    # non-interactive run that resolves no workspace fails fast.
+    #
+    # `ws_CHANGE_ME` is the one value `ci.yml` treats as "not linked yet" and
+    # plans nothing for. A bootstrap writes the product's workspace here; by
+    # hand, set it to yours (`orun cloud link`) and the Orun pipeline runs.
+    workspace: org_af26976cbbee4b54a6e455e3e19f6980
+    requireOrg: true
+    # Push the resolved catalog after a successful plan on the default branch,
+    # keeping the workspace-global catalog head fresh without an explicit
+    # `--push-catalog`.
+    autopushCatalog: true
+  # Lanes (orun ≥ v2.76.0): CI runs one GitHub job per LANE, not per orun job.
+  lanes:
+    mode: auto
+    maxLanes: 6
+    concurrency: 6
+
+compositions:
+  sources:
+    # The composition stack lives in sourceplane/stack-tectonic and is consumed
+    # as a published OCI artifact rather than a repo-local directory. Pin an
+    # explicit version: a bare repository reference resolves to `:latest`,
+    # which would let a catalog release change this repo's execution contracts
+    # without a commit here. Bumping the tag is the deliberate upgrade step.
+    #
+    # 0.19.0, NOT 0.20.0 (cirrus-baseline's pin). 0.20.0 makes the workspace
+    # install lane-scoped: it runs once in the source checkout and every job's
+    # staged tree LINKS its top-level node_modules there — out of the tree.
+    # Next 16's Turbopack refuses a dependency that resolves outside its root
+    # ("Symlink apps/web/node_modules/next is invalid, it points out of the
+    # filesystem root"): the first live bootstrap of a Next 16 product on these
+    # conventions died on it. This app builds on Next 15.5, and a move to 16 is
+    # one bump away. Under 0.19.0 the job installs inside its own tree, and the
+    # app has one job per lane (`lane: isolated`), so the shared install would
+    # save nothing anyway. 0.19.0 is also the floor: it
+    # retries a first deploy through Cloudflare's 10007 race and runs the smoke
+    # under backoff while a new workers.dev route propagates. A bump is a
+    # deliberate pull request that re-runs the lane's steps in a job tree
+    # staged with the new layout.
+    - name: stack-tectonic
+      kind: oci
+      ref: oci://ghcr.io/sourceplane/stack-tectonic:0.19.1
+  resolution:
+    precedence:
+      - stack-tectonic
+    bindings:
+      terraform: stack-tectonic
+      cloudflare-domain: stack-tectonic
+      db-migrate: stack-tectonic
+
+# The live preview (saas-parallel-baselining PB4): the component orun.work's
+# Preview tab shows while a coding session works on the site. Its own
+# `spec.preview` (apps/web/component.yaml) says how it runs; `orun preview`
+# runs it.
+preview:
+  component: web
+
+discovery:
+  roots:
+    - apps/
+    - infra/
+    - packages/
+    - tests/
+
+automation:
+  triggerBindings:
+    github-pull-request:
+      description: Pull request validation
+      on:
+        provider: github
+        event: pull_request
+        actions:
+          - opened
+          - synchronize
+          - reopened
+          - ready_for_review
+        baseBranches:
+          - main
+      plan:
+        scope: changed
+        base: pull_request.base.sha
+        head: pull_request.head.sha
+
+    github-push-main:
+      description: Main branch stack convergence after merge
+      on:
+        provider: github
+        event: push
+        branches:
+          - main
+
+    local-development:
+      description: Local testing with full Terraform execution
+      on:
+        provider: local
+
+environments:
+  dev:
+    description: Verify-only. Pull requests plan and verify here; nothing is deployed.
+    activation:
+      triggerRefs:
+        - github-pull-request
+        # @dev-lanes-deferred:ICAgICAgICAtIGdpdGh1Yi1wdXNoLW1haW4= (tooling/bootstrap/dev-lanes.mjs --restore puts it back)
+        - local-development
+    dependencyMode: advisory
+    policies:
+      requireApproval: "false"
+    env:
+      BASE_DOMAIN: pdf-quiz-generator.example.com
+
+  stage:
+    description: Deployed on every merge to main, before prod.
+    url: https://pdf-quiz-generator-web-stage.vijayakrishnan12994.workers.dev
+    activation:
+      triggerRefs:
+        - github-pull-request
+        - github-push-main
+    policies:
+      requireApproval: "false"
+    env:
+      BASE_DOMAIN: pdf-quiz-generator.example.com
+
+  prod:
+    description: Where visitors are. Deploys after stage converges on the same commit.
+    url: https://pdf-quiz-generator-web-prod.vijayakrishnan12994.workers.dev
+    activation:
+      triggerRefs:
+        - github-pull-request
+        - github-push-main
+    # @promotion-deferred:ICAgIHByb21vdGlvbjoKICAgICAgZGVwZW5kc09uOgogICAgICAgIC0gZW52aXJvbm1lbnQ6IHN0YWdl (tooling/bootstrap/promotion.mjs --restore puts it back)
+    policies:
+      requireApproval: "false"
+    env:
+      BASE_DOMAIN: pdf-quiz-generator.example.com
+
+# Repo-level catalog entity: front page + role-tagged docs (rendered in the
+# workspace Docs library, pinned to the commit by `orun plan`).
+repo:
+  displayName: pdf-quiz-generator
+  docs:
+    overview: README.md
+    pages:
+      - { path: ai/context/operations.md, role: runbook, title: Operating contract }
+      - { path: ai/context/deployment.md, role: reference, title: Live deployment manifest }

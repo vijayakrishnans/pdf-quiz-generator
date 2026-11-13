@@ -1,0 +1,33 @@
+{
+  "name": "@app/web-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "@ai-sdk/google": "4.0.118",
+    "@ai-sdk/provider": "4.0.37",
+    "@ai-sdk/react": "4.0.174",
+    "@app/eslint-config": "workspace:*",
+    "@app/tsconfig": "workspace:*",
+    "@opennextjs/cloudflare": "1.20.16",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.9.0",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "agents": "0.31.0",
+    "ai": "7.0.170",
+    "jsdom": "^26.1.0",
+    "next": "15.5.29",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "zod": "^4.1.8"
+  }
+}
