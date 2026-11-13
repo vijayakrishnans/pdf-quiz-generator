@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pdf-quiz-generator-web",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // Workers AI: the PDF's conversion to Markdown (toMarkdown) and the quiz and
+  // its title (lib/ai.ts). A binding with no resource to provision and no key.
+  "ai": {
+    "binding": "AI"
+  },
+  "observability": { "enabled": true }
+}

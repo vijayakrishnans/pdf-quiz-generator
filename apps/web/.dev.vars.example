@@ -1,0 +1,7 @@
+# Local Worker secrets for `wrangler dev` / `pnpm preview` (opennextjs-cloudflare
+# preview). Copy to .dev.vars (git-ignored). On stage and prod it is the
+# product's optional Orun secret GOOGLE_GENERATIVE_AI_API_KEY, which the deploy
+# pushes to the Worker (tooling/wire/worker-secrets.mjs). Without it the quiz
+# runs on Workers AI (the AI binding; `wrangler dev` reaches it only when you
+# are logged in to Cloudflare, since Workers AI has no local mode).
+GOOGLE_GENERATIVE_AI_API_KEY=

@@ -1,0 +1,129 @@
+apiVersion: sourceplane.io/v1
+kind: Component
+metadata:
+  name: web
+  description: The PDF quiz generator, its quiz streamed from Workers AI (Next.js on Cloudflare Workers + Static Assets via @opennextjs/cloudflare, with the Workers AI binding, per environment)
+spec:
+  type: cloudflare-workers-assets-turbo
+  lifecycle: production
+  owner: platform
+  # Its pages, attached to it in the workspace's catalog: what the Docs
+  # library shows for it, and what the catalog's docs and runbook checks read.
+  # Generated from what this manifest and its sources declare.
+  docs:
+    overview: docs/overview.md
+    pages:
+      - { path: docs/architecture.md, role: architecture, title: Architecture }
+      - { path: docs/runbook.md, role: runbook, title: Runbook }
+  # `app`, not `web`: a domain and a component share one name space in the
+  # catalog, and a domain called `web` hid this component from it.
+  domain: app
+  path: apps/web
+  # Its own lane per environment: the Next.js build is the longest job in the
+  # plan, and a shared lane would wait on it.
+  lane: isolated
+  # No dependsOn: the app reads no wiring and binds nothing that is provisioned
+  # (its one binding, Workers AI, is declared in wrangler.jsonc and needs no
+  # resource), so there is no infra component to deploy before it. A component
+  # under infra/ that this Worker comes to read wiring from goes here,
+  # `mode: enforced` with a `modeRules` entry making it advisory on
+  # github-pull-request, so one convergence applies it first.
+  #
+  # Google's Gemini, which the owner MAY connect after the bootstrap: a Google
+  # AI Studio API key, stored per environment as the product's secret
+  # GOOGLE_GENERATIVE_AI_API_KEY (README → Use Google's Gemini). It reaches the
+  # Worker as a SECRET at deploy (buildCommand below) and the quiz route reads
+  # it per request (lib/ai.ts) — never the build. Optional: one not stored yet
+  # is skipped when the job resolves its secrets (no env var, no failure), and
+  # the quiz then runs on Workers AI through the Worker's own binding, with no
+  # key at all — so a fresh product deploys and makes quizzes from the start.
+  optionalSecretEnv:
+    GOOGLE_GENERATIVE_AI_API_KEY: "secret://pdf-quiz-generator/pdf-quiz-generator/{{ .environment }}/GOOGLE_GENERATIVE_AI_API_KEY"
+  subscribe:
+    environments:
+      - name: dev
+        profile: verify
+      - name: stage
+        profile: verify
+        profileRules:
+          - profile: deploy
+            when:
+              triggerRef: github-push-main
+      - name: prod
+        profile: verify
+        profileRules:
+          - profile: deploy
+            when:
+              triggerRef: github-push-main
+  # How the site runs itself for orun.work's live Preview tab
+  # (saas-parallel-baselining PB4): `orun preview` starts this, and a coding
+  # session keeps it running while it works, so the person watches it change
+  # as it is built. The dev server binds the box's loopback only, on a fixed
+  # port, and installs first, so a checkout the session has not installed yet
+  # still comes up.
+  # Workers AI has no local mode and `next dev` has no Cloudflare context: the
+  # page renders and takes an upload, and the quiz route answers that Workers
+  # AI is not bound (503) — quizzes need a deployment (or the owner's Google
+  # key, an Orun secret that never goes in env here).
+  preview:
+    run:
+      - sh
+      - -c
+      - pnpm install --frozen-lockfile --prefer-offline --filter "@app/web..." && exec node_modules/.bin/next dev -H 127.0.0.1 -p 3000
+    port: 3000
+    path: /
+    env:
+      NODE_OPTIONS: --max-old-space-size=1024
+      NEXT_TELEMETRY_DISABLED: "1"
+  parameters:
+    nodeVersion: "22"
+    pnpmVersion: "10.12.1"
+
+    workspaceDir: ../..
+    appDir: .
+
+    turboFilter: "@app/web"
+    wranglerConfig: wrangler.jsonc
+
+    # @opennextjs/cloudflare emits a Worker entrypoint plus a static-assets
+    # directory bound via ASSETS — both deploy in one `wrangler deploy`, with
+    # the AI binding wrangler.jsonc declares.
+    workerEntrypoint: .open-next/worker.js
+    assetsDir: .open-next/assets
+
+    # Per-env worker name: pdf-quiz-generator-web-{dev,stage,prod}.
+    workerName: pdf-quiz-generator-web
+    environmentAwareWorkerName: true
+
+    # The account's workers.dev subdomain; exported to the smoke step as
+    # ${WORKERS_DEV_SUBDOMAIN} and used to build ${DEPLOYED_URL}.
+    workersDevSubdomain: vijayakrishnan12994
+
+    installCommand: pnpm install --frozen-lockfile
+    # The site's public origin (NEXT_PUBLIC_SITE_URL, inlined by Next.js into
+    # app/site.ts for metadataBase): the environment's SITE_URL when
+    # intent.yaml sets one (a custom domain), else its workers.dev URL. The
+    # subdomain is written out rather than read from ${WORKERS_DEV_SUBDOMAIN}:
+    # the composition exports that to the smoke step only, so the build would
+    # see it empty. ${ORUN_ENVIRONMENT} the runner sets for every step.
+    #
+    # The Google key is UNSET for the build (`env -u`), so no bundle can carry
+    # it, and goes to the Worker as a SECRET after it
+    # (tooling/wire/worker-secrets.mjs: `wrangler secret bulk` over stdin; a
+    # verify lane holds no Cloudflare credential and pushes nothing). A secret
+    # changed later reaches the Worker on the next deploy.
+    buildCommand: env -u GOOGLE_GENERATIVE_AI_API_KEY NEXT_PUBLIC_SITE_URL="${SITE_URL:-https://pdf-quiz-generator-web-${ORUN_ENVIRONMENT}.vijayakrishnan12994.workers.dev}" pnpm exec turbo run build --filter=@app/web && node ../../tooling/wire/worker-secrets.mjs --secret GOOGLE_GENERATIVE_AI_API_KEY --worker "pdf-quiz-generator-web-${ORUN_ENVIRONMENT}" --config wrangler.jsonc
+
+    # Smoke: the home page renders the upload card — its "Drop your PDF here"
+    # prompt, not the site's name, which is the owner's to change and
+    # HTML-escaped when it carries an `&` or `'` — and the quiz route answers a
+    # request with no PDF with its own 400, an answer only the Worker's server
+    # code gives and one that calls no model, so the smoke spends nothing. The
+    # page is buffered before grep so an early match cannot SIGPIPE curl.
+    smokeCommand: "html=$(curl -sfL \"${DEPLOYED_URL}/\") && echo \"${html}\" | grep -q 'Drop your PDF here' && test \"$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{}' \"${DEPLOYED_URL}/api/generate-quiz\")\" = 400"
+  labels:
+    team: platform
+    layer: delivery
+    surface: web
+    runtime: cloudflare
+# orun: redeploy 01-product as_56a7ef23c6b6498ba482
